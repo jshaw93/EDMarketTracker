@@ -69,11 +69,12 @@ main :: proc() {
         now, _ := time.time_to_datetime(time.now())
         delta, _ := datetime.subtract_datetimes(now, modTime)
         if delta.days > 1 do continue
-        if delta.seconds < latestDelta.seconds {
+        if delta.days < latestDelta.days {
             latestDelta = delta
             latest = i
+            continue
         }
-        if delta.days < latestDelta.days {
+        if delta.seconds < latestDelta.seconds {
             latestDelta = delta
             latest = i
         }
