@@ -46,6 +46,8 @@ Pads :: struct{
     Large : i64
 }
 
+I64MAX :: 0x7fffffffffffffff
+
 main :: proc() {
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
@@ -62,7 +64,7 @@ main :: proc() {
     }
     fileInfos, fErr := os.read_dir(handle, 256, arenaAlloc)
     latest : os.File_Info
-    latestDelta : datetime.Delta = {1500, 0, 0}
+    latestDelta : datetime.Delta = {I64MAX, 0, 0}
     for i in fileInfos {
         if !strings.contains(i.name, ".log") do continue
         modTime, _ := time.time_to_datetime(i.modification_time)
