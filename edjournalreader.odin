@@ -8,6 +8,7 @@ import "core:strings"
 import "core:encoding/json"
 import "core:mem"
 import vmem "core:mem/virtual"
+import "core:slice"
 
 DockedEvent :: struct {
     timestamp : string,
@@ -47,11 +48,29 @@ Pads :: struct{
 }
 
 main :: proc() {
+    fmt.println("ED Journal Reader is now running!\n")
+
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
     if allocErr != nil do fmt.panicf("Allocation Error:", allocErr)
     defer vmem.arena_destroy(&arena)
     arenaAlloc := vmem.arena_allocator(&arena)
+
+    dockedEvents := make(map[string]DockedEvent, arenaAlloc)
+    defer delete(dockedEvents)
+
+    // Check if marketdata.json exists, if it doesn't then make marketdata.json, otherwise read marketdata.json
+    mDataExists : bool = os.exists("marketdata.json")
+    if !mDataExists {
+        mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
+        if mErr != nil do fmt.panicf("Marshall err on line 64:", mErr)
+        success := os.write_entire_file("marketdata.json", mData)
+        if !success do fmt.panicf("Failed to write file")
+    } else {
+        jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
+        umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
+        if umErr != nil do fmt.panicf("Unmarshall Error at line 70:", umErr)
+    }
 
     // Open journal directory and find latest journal
     user := os.get_env("USERPROFILE", arenaAlloc)
@@ -100,7 +119,12 @@ main :: proc() {
 
     dEvent : DockedEvent = deserializeDockedEvent(last, arenaAlloc)
     
-    printEconomies(dEvent)
+    modified : bool = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
+    if modified {
+        printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
+        dockedEvents[dEvent.StationName] = dEvent
+        writeData(dockedEvents, arenaAlloc)
+    }
 
     fileStat, _ := os.stat(latest.fullpath, arenaAlloc)
     for {
@@ -111,23 +135,34 @@ main :: proc() {
         buff : [mem.Kilobyte*12]byte
         newBytesRead, rErr := os.read_at(logHandle, buff[:], current.size - diff)
         newData : string = string(buff[:])
-        newDataLines : []string = strings.split(newData, "\n", arenaAlloc)
+        newDataLines : []string = strings.split(newData, "\r\n", arenaAlloc)
         for line in newDataLines {
             if !strings.contains(line, "\"event\":\"Docked\"") do continue
             dEvent = deserializeDockedEvent(line, arenaAlloc)
-            printEconomies(dEvent)
+            modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
+            if modified {
+                printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
+                dockedEvents[dEvent.StationName] = dEvent
+                writeData(dockedEvents, arenaAlloc)
+            }
         }
         fileStat = current
     }
 }
 
-printEconomies :: proc(dEvent : DockedEvent) {
+printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
     // Read out Market values from docked event struct
-    fmt.println("Market Types for", dEvent.StationName, "\b:")
+    fmt.println("Old Market values for", dEvent.StationName, "\b:")
+    if len(historic) > 0 {
+        for market in historic {
+            fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
+        }
+    } else do fmt.println("    None")
+    fmt.println("New Market Types for", dEvent.StationName, "\b:")
     for market in dEvent.StationEconomies {
-        fmt.printfln("%s: %.2f", market.Name_Localised, market.Proportion)
+        fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
     }
-    fmt.println("====================")
+    fmt.println("=======================================")
 }
 
 deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> DockedEvent {
@@ -136,4 +171,17 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
     if uErr != nil do fmt.panicf("Unmarshall error:", uErr)
     return dEvent
+}
+
+writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.allocator) {
+    options : json.Marshal_Options
+    options.indentation = 4
+    dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
+    if mErr != nil do fmt.panicf("Marshall Err on line 176:", mErr)
+    success := os.write_entire_file("marketdata.json", dData[:])
+    if !success do fmt.panicf("Failed to write file")
+}
+
+isMarketModified :: proc(newMarket, historicMarket : []Economy) -> bool {
+    return !slice.equal(newMarket, historicMarket)
 }
