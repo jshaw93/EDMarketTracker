@@ -41,12 +41,10 @@ Economy :: struct {
 }
 
 Pads :: struct{
-    Small : i64,
-    Medium : i64,
-    Large : i64
+    Small : u8,
+    Medium : u8,
+    Large : u8
 }
-
-I64MAX :: 0x7fffffffffffffff
 
 main :: proc() {
     arena : vmem.Arena
@@ -64,7 +62,7 @@ main :: proc() {
     }
     fileInfos, fErr := os.read_dir(handle, 256, arenaAlloc)
     latest : os.File_Info
-    latestDelta : datetime.Delta = {I64MAX, 0, 0}
+    latestDelta : datetime.Delta = {0x7fffffffffffffff, 0, 0}
     for i in fileInfos {
         if !strings.contains(i.name, ".log") do continue
         modTime, _ := time.time_to_datetime(i.modification_time)
@@ -83,8 +81,9 @@ main :: proc() {
     }
 
     // Read file
-    data, readErr := os.read_entire_file_from_filename(latest.fullpath, allocator=arenaAlloc)
-    if !readErr do fmt.panicf("Read err:", readErr)
+    logHandle, readErr := os.open(latest.fullpath)
+    if readErr!= nil do fmt.panicf("Read err:", readErr)
+    data, _ := os.read_entire_file_from_handle(logHandle, arenaAlloc)
     dataString : string = string(data)
     lines : []string = strings.split(dataString, "\r\n", arenaAlloc)
     if len(lines) < 5 {
@@ -99,14 +98,42 @@ main :: proc() {
     }
     if len(last) == 0 do return
 
-    // Deserialize Docked Event
-    dEvent : DockedEvent
-    uErr := json.unmarshal_string(last, &dEvent, allocator=arenaAlloc)
-    if uErr != nil do fmt.panicf("Unmarshall error:", uErr)
+    dEvent : DockedEvent = deserializeDockedEvent(last, arenaAlloc)
     
+    printEconomies(dEvent)
+
+    fileStat, _ := os.stat(latest.fullpath, arenaAlloc)
+    for {
+        time.sleep(time.Second)
+        current, _ := os.stat(latest.fullpath, arenaAlloc)
+        if current.modification_time == fileStat.modification_time do continue
+        diff : i64 = current.size - fileStat.size
+        buff : [mem.Kilobyte*12]byte
+        newBytesRead, rErr := os.read_at(handle, buff[:], current.size - diff)
+        newData : string = string(buff[:])
+        newDataLines : []string = strings.split(newData, "\n", arenaAlloc)
+        for line in newDataLines {
+            if !strings.contains(line, "\"event\":\"Docked\"") do continue
+            dEvent = deserializeDockedEvent(line, arenaAlloc)
+            printEconomies(dEvent)
+        }
+        fileStat = current
+    }
+}
+
+printEconomies :: proc(dEvent : DockedEvent) {
     // Read out Market values from docked event struct
+    fmt.println("====================")
     fmt.println("Market Types for", dEvent.StationName, "\b:")
     for market in dEvent.StationEconomies {
         fmt.printfln("%s: %.2f", market.Name_Localised, market.Proportion)
     }
+}
+
+deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> DockedEvent {
+    // Deserialize Docked Event
+    dEvent : DockedEvent
+    uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
+    if uErr != nil do fmt.panicf("Unmarshall error:", uErr)
+    return dEvent
 }
