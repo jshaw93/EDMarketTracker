@@ -63,13 +63,13 @@ main :: proc() {
     mDataExists : bool = os.exists("marketdata.json")
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
-        if mErr != nil do fmt.panicf("Marshall err on line 64:", mErr)
+        if mErr != nil do fmt.panicf("Marshall err on line 65:", mErr)
         success := os.write_entire_file("marketdata.json", mData)
         if !success do fmt.panicf("Failed to write file")
     } else {
         jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
-        if umErr != nil do fmt.panicf("Unmarshall Error at line 70:", umErr)
+        if umErr != nil do fmt.panicf("Unmarshall Error at line 71:", umErr)
     }
 
     // Open journal directory and find latest journal
@@ -177,7 +177,7 @@ writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.al
     options : json.Marshal_Options
     options.indentation = 4
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
-    if mErr != nil do fmt.panicf("Marshall Err on line 176:", mErr)
+    if mErr != nil do fmt.panicf("Marshall Err on line 179:", mErr)
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success do fmt.panicf("Failed to write file")
 }
