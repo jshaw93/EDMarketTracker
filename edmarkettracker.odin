@@ -48,7 +48,7 @@ Pads :: struct{
 }
 
 main :: proc() {
-    fmt.println("ED Journal Reader is now running!\n")
+    fmt.println("ED Market Tracker is now running!\n")
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
