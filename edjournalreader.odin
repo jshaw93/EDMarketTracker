@@ -109,7 +109,7 @@ main :: proc() {
         if current.modification_time == fileStat.modification_time do continue
         diff : i64 = current.size - fileStat.size
         buff : [mem.Kilobyte*12]byte
-        newBytesRead, rErr := os.read_at(handle, buff[:], current.size - diff)
+        newBytesRead, rErr := os.read_at(logHandle, buff[:], current.size - diff)
         newData : string = string(buff[:])
         newDataLines : []string = strings.split(newData, "\n", arenaAlloc)
         for line in newDataLines {
@@ -123,11 +123,11 @@ main :: proc() {
 
 printEconomies :: proc(dEvent : DockedEvent) {
     // Read out Market values from docked event struct
-    fmt.println("====================")
     fmt.println("Market Types for", dEvent.StationName, "\b:")
     for market in dEvent.StationEconomies {
         fmt.printfln("%s: %.2f", market.Name_Localised, market.Proportion)
     }
+    fmt.println("====================")
 }
 
 deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> DockedEvent {
