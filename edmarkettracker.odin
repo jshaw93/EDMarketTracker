@@ -1,4 +1,4 @@
-package parser
+package markettracker
 
 import "core:fmt"
 import "core:os"
