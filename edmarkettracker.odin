@@ -64,21 +64,47 @@ main :: proc() {
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
         if mErr != nil {
-            panic("Marshall Error on line 65")
+            fmt.println("Marshall Error on line 65:", mErr)
+            return
         }
         success := os.write_entire_file("marketdata.json", mData)
-        if !success do panic("Failed to write file")
+        if !success {
+            fmt.println("Failed to write marketdata.json on line 70")
+            return
+        }
     } else {
         jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
-        if umErr != nil do panic("Unmarshall Error at line 73")
+        if umErr != nil {
+            fmt.println("Unmarshall Error at line 77:", umErr)
+            return
+        }
+    }
+
+    // Check if config.json exists, if it doesn't then make config.json, otherwise read config.json
+    config : map[string]string
+    defer delete(config)
+    configExists : bool = os.exists("config.json")
+    if !configExists {
+        buildErr : u8 = 0
+        config, buildErr = buildConfig(arenaAlloc)
+        if buildErr != 0 do return
+    } else {
+        configRaw, success := os.read_entire_file_from_filename("config.json", arenaAlloc)
+        umErr := json.unmarshal(configRaw, &config, allocator=arenaAlloc)
+        if umErr != nil {
+            fmt.println("Unmarshall Error at line 94:", umErr)
+            return
+        }
     }
 
     // Open journal directory and find latest journal
-    user := os.get_env("USERPROFILE", arenaAlloc)
-    logPath : string = strings.concatenate({user, "\\Saved Games\\Frontier Developments\\Elite Dangerous"}, arenaAlloc)
+    logPath : string = config["JournalDirectory"]
     handle, err := os.open(logPath)
-    if err != nil do panic("Open error line 80")
+    if err != nil {
+        fmt.println("Open error line 103:", err)
+        return
+    }
     defer os.close(handle)
     fileInfos, fErr := os.read_dir(handle, 256, arenaAlloc)
     latest : os.File_Info
@@ -104,7 +130,8 @@ main :: proc() {
     logHandle, readErr := os.open(latest.fullpath)
     if readErr != nil {
         fmt.println("Does", latest.fullpath, "exist?")
-        panic("Read error at line 105, missing file")
+        fmt.println("Read error at line 130, missing file")
+        return
     }
     defer os.close(logHandle)
     data, _ := os.read_entire_file_from_handle(logHandle, arenaAlloc)
@@ -120,17 +147,21 @@ main :: proc() {
         if !strings.contains(line, "\"event\":\"Docked\"") do continue
         last = line
     }
-    if len(last) == 0 do return
 
-    dEvent : DockedEvent = deserializeDockedEvent(last, arenaAlloc)
-    
-    modified : bool = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-    if modified && !checkAvoid(dEvent.StationName) {
-        printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
-        dockedEvents[dEvent.StationName] = dEvent
-        writeData(dockedEvents, arenaAlloc)
+    dEvent : DockedEvent
+    modified : bool
+
+    if len(last) > 0 {
+        dEvent = deserializeDockedEvent(last, arenaAlloc)
+        
+        modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
+        if modified && !checkAvoid(dEvent.StationName) {
+            printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
+            dockedEvents[dEvent.StationName] = dEvent
+            writeErr := writeData(dockedEvents, arenaAlloc)
+            if writeErr != 0 do return
+        }
     }
-
     fileStat, _ := os.stat(latest.fullpath, arenaAlloc)
     for {
         time.sleep(time.Second)
@@ -148,7 +179,8 @@ main :: proc() {
             if modified && !checkAvoid(dEvent.StationName) {
                 printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                 dockedEvents[dEvent.StationName] = dEvent
-                writeData(dockedEvents, arenaAlloc)
+                writeErr := writeData(dockedEvents, arenaAlloc)
+                if writeErr != 0 do return
             }
         }
         fileStat = current
@@ -174,17 +206,24 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 176")
+    if uErr != nil do panic("Unmarshall error at line 208")
     return dEvent
 }
 
-writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.allocator) {
+writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.allocator) -> u8 {
     options : json.Marshal_Options
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
-    if mErr != nil do panic("Marshall Err on line 184:")
+    if mErr != nil {
+        fmt.println("Marshall Err on line 216:", mErr)
+        return 1
+    }
     success := os.write_entire_file("marketdata.json", dData[:])
-    if !success do panic("Failed to write file")
+    if !success {
+        fmt.println("Failed to write marketdata.json at line 221")
+        return 2
+    }
+    return 0
 }
 
 isMarketModified :: proc(newMarket, historicMarket : []Economy) -> bool {
@@ -197,4 +236,24 @@ checkAvoid :: proc(stationName : string)  -> bool {
         if strings.contains(stationName, name) do return true
     }
     return false
+}
+
+buildConfig :: proc(allocator := context.allocator) -> (config : map[string]string, err : u8) {
+    baseConfig := make(map[string]string, allocator)
+    user := os.get_env("USERPROFILE", allocator)
+    logPath : string = strings.concatenate({user, "\\Saved Games\\Frontier Developments\\Elite Dangerous"}, allocator)
+    baseConfig["JournalDirectory"] = logPath
+    mOpt : json.Marshal_Options
+    mOpt.pretty = true
+    data, mErr := json.marshal(baseConfig, mOpt, allocator)
+    if mErr != nil {
+        fmt.println("Marshall Error on line 248:", mErr)
+        return baseConfig, 1
+    }
+    success := os.write_entire_file("config.json", data)
+    if !success {
+        fmt.println("Failed to write config.json on line 253")
+        return baseConfig, 2
+    }
+    return baseConfig, 0
 }
