@@ -48,11 +48,11 @@ Pads :: struct{
 }
 
 main :: proc() {
-    fmt.println("ED Journal Reader is now running!\n")
+    fmt.println("ED Market Tracker is now running!\n")
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
-    if allocErr != nil do fmt.panicf("Allocation Error:", allocErr)
+    if allocErr != nil do panic("Allocation Error at line 54")
     defer vmem.arena_destroy(&arena)
     arenaAlloc := vmem.arena_allocator(&arena)
 
@@ -63,22 +63,23 @@ main :: proc() {
     mDataExists : bool = os.exists("marketdata.json")
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
-        if mErr != nil do fmt.panicf("Marshall err on line 64:", mErr)
+        if mErr != nil {
+            panic("Marshall Error on line 65")
+        }
         success := os.write_entire_file("marketdata.json", mData)
-        if !success do fmt.panicf("Failed to write file")
+        if !success do panic("Failed to write file")
     } else {
         jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
-        if umErr != nil do fmt.panicf("Unmarshall Error at line 70:", umErr)
+        if umErr != nil do panic("Unmarshall Error at line 73")
     }
 
     // Open journal directory and find latest journal
     user := os.get_env("USERPROFILE", arenaAlloc)
     logPath : string = strings.concatenate({user, "\\Saved Games\\Frontier Developments\\Elite Dangerous"}, arenaAlloc)
     handle, err := os.open(logPath)
-    if err != nil {
-        fmt.panicf("Open err:", err)
-    }
+    if err != nil do panic("Open error line 80")
+    defer os.close(handle)
     fileInfos, fErr := os.read_dir(handle, 256, arenaAlloc)
     latest : os.File_Info
     latestDelta : datetime.Delta = {0x7fffffffffffffff, 0, 0}
@@ -101,7 +102,11 @@ main :: proc() {
 
     // Read file
     logHandle, readErr := os.open(latest.fullpath)
-    if readErr!= nil do fmt.panicf("Read err:", readErr)
+    if readErr != nil {
+        fmt.println("Does", latest.fullpath, "exist?")
+        panic("Read error at line 105, missing file")
+    }
+    defer os.close(logHandle)
     data, _ := os.read_entire_file_from_handle(logHandle, arenaAlloc)
     dataString : string = string(data)
     lines : []string = strings.split(dataString, "\r\n", arenaAlloc)
@@ -120,7 +125,7 @@ main :: proc() {
     dEvent : DockedEvent = deserializeDockedEvent(last, arenaAlloc)
     
     modified : bool = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-    if modified {
+    if modified && !checkAvoid(dEvent.StationName) {
         printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
         dockedEvents[dEvent.StationName] = dEvent
         writeData(dockedEvents, arenaAlloc)
@@ -140,7 +145,7 @@ main :: proc() {
             if !strings.contains(line, "\"event\":\"Docked\"") do continue
             dEvent = deserializeDockedEvent(line, arenaAlloc)
             modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-            if modified {
+            if modified && !checkAvoid(dEvent.StationName) {
                 printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                 dockedEvents[dEvent.StationName] = dEvent
                 writeData(dockedEvents, arenaAlloc)
@@ -169,19 +174,27 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do fmt.panicf("Unmarshall error:", uErr)
+    if uErr != nil do panic("Unmarshall error at line 176")
     return dEvent
 }
 
 writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.allocator) {
     options : json.Marshal_Options
-    options.indentation = 4
+    options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
-    if mErr != nil do fmt.panicf("Marshall Err on line 176:", mErr)
+    if mErr != nil do panic("Marshall Err on line 184:")
     success := os.write_entire_file("marketdata.json", dData[:])
-    if !success do fmt.panicf("Failed to write file")
+    if !success do panic("Failed to write file")
 }
 
 isMarketModified :: proc(newMarket, historicMarket : []Economy) -> bool {
     return !slice.equal(newMarket, historicMarket)
+}
+
+checkAvoid :: proc(stationName : string)  -> bool {
+    AVOIDWRITE :[]string: {"Construction Site", "ColonisationShip"}
+    for name in AVOIDWRITE {
+        if strings.contains(stationName, name) do return true
+    }
+    return false
 }
