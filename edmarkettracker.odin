@@ -62,15 +62,22 @@ main :: proc() {
     if !windows.SetConsoleMode(hStdOut, mode) do return
     windows.SetConsoleCtrlHandler(handler, true) // handle CTRL+C
 
+    defer {
+        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h")
+        windows.SetConsoleMode(hStdOut, originalMode)
+    }
+
     // Set ANSI mode
     fmt.print("\x1b[=14h\x1b[?25l")
 
     // Clear console, return cursor to 0, 0 & set color
-    fmt.println("\x1b[2J\x1b[H\x1b[38;5;208m")
+    fmt.println("\x1b[3J\x1b[H\x1b[J\x1b[38;5;208m")
+
+    printArt()
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
-    if allocErr != nil do panic("Allocation Error at line 54")
+    if allocErr != nil do panic("Allocation Error at line 79")
     defer vmem.arena_destroy(&arena)
     arenaAlloc := vmem.arena_allocator(&arena)
 
@@ -82,19 +89,19 @@ main :: proc() {
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
         if mErr != nil {
-            fmt.println("Marshall Error on line 65:", mErr)
+            fmt.println("Marshall Error on line 90:", mErr)
             return
         }
         success := os.write_entire_file("marketdata.json", mData)
         if !success {
-            fmt.println("Failed to write marketdata.json on line 70")
+            fmt.println("Failed to write marketdata.json on line 95")
             return
         }
     } else {
         jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 77:", umErr)
+            fmt.println("Unmarshall Error at line 102:", umErr)
             return
         }
     }
@@ -111,7 +118,7 @@ main :: proc() {
         configRaw, success := os.read_entire_file_from_filename("config.json", arenaAlloc)
         umErr := json.unmarshal(configRaw, &config, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 94:", umErr)
+            fmt.println("Unmarshall Error at line 119:", umErr)
             return
         }
     }
@@ -120,7 +127,7 @@ main :: proc() {
     logPath : string = config["JournalDirectory"]
     handle, err := os.open(logPath)
     if err != nil {
-        fmt.println("Open error line 103:", err)
+        fmt.println("Open error line 128:", err)
         return
     }
     defer os.close(handle)
@@ -148,7 +155,7 @@ main :: proc() {
     logHandle, readErr := os.open(latest.fullpath)
     if readErr != nil {
         fmt.println("Does", latest.fullpath, "exist?")
-        fmt.println("Read error at line 130, missing file")
+        fmt.println("Read error at line 155, missing file")
         return
     }
     defer os.close(logHandle)
@@ -203,26 +210,26 @@ main :: proc() {
 }
 
 printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
-    // Clear console, return cursor to 0, 0
-    fmt.print("\x1b[3J\x1b[H")
+    // Return cursor to 0, 0, then clear the terminal
+    fmt.print("\x1b[3J\x1b[H\x1b[J")
     printArt()
     fmt.println("=======================================")
     // Read out Market values from docked event struct
     if isMarketModified(dEvent.StationEconomies, historic) {
-        fmt.println("\x1b[2K  Old Market values for", dEvent.StationName, "\b:")
+        fmt.println("  Old Market values for", dEvent.StationName, "\b:")
         if len(historic) > 0 {
             for market in historic {
-                fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+                fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
             }
         } else do fmt.println("    None")
-        fmt.println("\x1b[2K  New Market Types for", dEvent.StationName, "\b:")
+        fmt.println("  New Market Types for", dEvent.StationName, "\b:")
         for market in dEvent.StationEconomies {
-            fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+            fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
         }
     } else {
-        fmt.println("\x1b[2K  Market values for", dEvent.StationName, "\b:")
+        fmt.println("  Market values for", dEvent.StationName, "\b:")
         for market in dEvent.StationEconomies {
-            fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+            fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
         }
     }
     fmt.println("=======================================")
@@ -232,7 +239,7 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 208")
+    if uErr != nil do panic("Unmarshall error at line 241")
     return dEvent
 }
 
@@ -241,12 +248,12 @@ writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.al
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
     if mErr != nil {
-        fmt.println("Marshall Err on line 216:", mErr)
+        fmt.println("Marshall Err on line 249:", mErr)
         return 1
     }
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success {
-        fmt.println("Failed to write marketdata.json at line 221")
+        fmt.println("Failed to write marketdata.json at line 254")
         return 2
     }
     return 0
@@ -273,12 +280,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 248:", mErr)
+        fmt.println("Marshall Error on line 281:", mErr)
         return baseConfig, 1
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 253")
+        fmt.println("Failed to write config.json on line 286")
         return baseConfig, 2
     }
     return baseConfig, 0
