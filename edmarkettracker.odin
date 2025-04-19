@@ -10,6 +10,7 @@ import "core:mem"
 import vmem "core:mem/virtual"
 import "core:slice"
 import "core:sys/windows"
+import "base:runtime"
 
 DockedEvent :: struct {
     timestamp : string,
@@ -48,21 +49,24 @@ Pads :: struct{
     Large : u8
 }
 
+originalMode : windows.DWORD
+hStdOut : windows.HANDLE
+
 main :: proc() {
     // Enable virtual terminal processing
-    hStdOut := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+    hStdOut = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
     mode : windows.DWORD = 0
     if !windows.GetConsoleMode(hStdOut, &mode) do return
-    originalMode : windows.DWORD = mode
+    originalMode = mode
     mode |= windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING
     if !windows.SetConsoleMode(hStdOut, mode) do return
-    defer windows.SetConsoleMode(hStdOut, originalMode)
+    windows.SetConsoleCtrlHandler(handler, true) // handle CTRL+C
 
     // Set ANSI mode
-    fmt.print("\x1b[=14h")
+    fmt.print("\x1b[=14h\x1b[?25l")
 
-    // Clear console & return cursor to 0, 0
-    fmt.println("\x1b[2J\x1b[H")
+    // Clear console, return cursor to 0, 0 & set color
+    fmt.println("\x1b[2J\x1b[H\x1b[38;5;208m")
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
@@ -199,8 +203,8 @@ main :: proc() {
 }
 
 printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
-    // Clear console, return cursor to 0, 0, set color
-    fmt.print("\x1b[3J\x1b[H\x1b[38;5;208m")
+    // Clear console, return cursor to 0, 0
+    fmt.print("\x1b[3J\x1b[H")
     printArt()
     fmt.println("=======================================")
     // Read out Market values from docked event struct
@@ -222,7 +226,6 @@ printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
         }
     }
     fmt.println("=======================================")
-    fmt.print("\x1b[38;5;7m") // Reset color
 }
 
 deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> DockedEvent {
@@ -288,4 +291,16 @@ printArt :: proc() {
     fmt.println("|  __| | |  | | | |\\/| |/ _` | '__| |/ / _ \\ __|    | | '__/ _` |/ __| |/ / _ \\ '__|")
     fmt.println("| |____| |__| | | |  | | (_| | |  |   <  __/ |_     | | | | (_| | (__|   <  __/ |   ")
     fmt.println("|______|_____/  |_|  |_|\\__,_|_|  |_|\\_\\___|\\__|    |_|_|  \\__,_|\\___|_|\\_\\___|_|   ")
+}
+
+handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
+    // Handle CTRL+C, reset ANSI values upon leaving the program
+    ctx : runtime.Context = runtime.default_context()
+    context = ctx
+    if signal == windows.CTRL_C_EVENT {
+        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h")
+        windows.SetConsoleMode(hStdOut, originalMode)
+        windows.ExitProcess(1)
+    }
+    return windows.FALSE
 }
