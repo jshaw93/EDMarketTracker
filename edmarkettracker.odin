@@ -9,6 +9,8 @@ import "core:encoding/json"
 import "core:mem"
 import vmem "core:mem/virtual"
 import "core:slice"
+import "core:sys/windows"
+import "base:runtime"
 
 DockedEvent :: struct {
     timestamp : string,
@@ -47,8 +49,24 @@ Pads :: struct{
     Large : u8
 }
 
+originalMode : windows.DWORD
+hStdOut : windows.HANDLE
+
 main :: proc() {
-    fmt.println("ED Market Tracker is now running!\n")
+    // Enable virtual terminal processing
+    hStdOut = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+    mode : windows.DWORD = 0
+    if !windows.GetConsoleMode(hStdOut, &mode) do return
+    originalMode = mode
+    mode |= windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    if !windows.SetConsoleMode(hStdOut, mode) do return
+    windows.SetConsoleCtrlHandler(handler, true) // handle CTRL+C
+
+    // Set ANSI mode
+    fmt.print("\x1b[=14h\x1b[?25l")
+
+    // Clear console, return cursor to 0, 0 & set color
+    fmt.println("\x1b[2J\x1b[H\x1b[38;5;208m")
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
@@ -153,9 +171,7 @@ main :: proc() {
 
     if len(last) > 0 {
         dEvent = deserializeDockedEvent(last, arenaAlloc)
-        
-        modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-        if modified && !checkAvoid(dEvent.StationName) {
+        if !checkAvoid(dEvent.StationName) {
             printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
             dockedEvents[dEvent.StationName] = dEvent
             writeErr := writeData(dockedEvents, arenaAlloc)
@@ -175,8 +191,7 @@ main :: proc() {
         for line in newDataLines {
             if !strings.contains(line, "\"event\":\"Docked\"") do continue
             dEvent = deserializeDockedEvent(line, arenaAlloc)
-            modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-            if modified && !checkAvoid(dEvent.StationName) {
+            if !checkAvoid(dEvent.StationName) {
                 printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                 dockedEvents[dEvent.StationName] = dEvent
                 writeErr := writeData(dockedEvents, arenaAlloc)
@@ -188,16 +203,27 @@ main :: proc() {
 }
 
 printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
+    // Clear console, return cursor to 0, 0
+    fmt.print("\x1b[3J\x1b[H")
+    printArt()
+    fmt.println("=======================================")
     // Read out Market values from docked event struct
-    fmt.println("Old Market values for", dEvent.StationName, "\b:")
-    if len(historic) > 0 {
-        for market in historic {
-            fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
+    if isMarketModified(dEvent.StationEconomies, historic) {
+        fmt.println("\x1b[2K  Old Market values for", dEvent.StationName, "\b:")
+        if len(historic) > 0 {
+            for market in historic {
+                fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+            }
+        } else do fmt.println("    None")
+        fmt.println("\x1b[2K  New Market Types for", dEvent.StationName, "\b:")
+        for market in dEvent.StationEconomies {
+            fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
         }
-    } else do fmt.println("    None")
-    fmt.println("New Market Types for", dEvent.StationName, "\b:")
-    for market in dEvent.StationEconomies {
-        fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
+    } else {
+        fmt.println("\x1b[2K  Market values for", dEvent.StationName, "\b:")
+        for market in dEvent.StationEconomies {
+            fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+        }
     }
     fmt.println("=======================================")
 }
@@ -256,4 +282,25 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
         return baseConfig, 2
     }
     return baseConfig, 0
+}
+
+printArt :: proc() {
+    fmt.println(" ______ _____    __  __            _        _     _______             _             ")
+    fmt.println("|  ____|  __ \\  |  \\/  |          | |      | |   |__   __|           | |            ")
+    fmt.println("| |__  | |  | | | \\  / | __ _ _ __| | _____| |_     | |_ __ __ _  ___| | _____ _ __ ")
+    fmt.println("|  __| | |  | | | |\\/| |/ _` | '__| |/ / _ \\ __|    | | '__/ _` |/ __| |/ / _ \\ '__|")
+    fmt.println("| |____| |__| | | |  | | (_| | |  |   <  __/ |_     | | | | (_| | (__|   <  __/ |   ")
+    fmt.println("|______|_____/  |_|  |_|\\__,_|_|  |_|\\_\\___|\\__|    |_|_|  \\__,_|\\___|_|\\_\\___|_|   ")
+}
+
+handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
+    // Handle CTRL+C, reset ANSI values upon leaving the program
+    ctx : runtime.Context = runtime.default_context()
+    context = ctx
+    if signal == windows.CTRL_C_EVENT {
+        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h")
+        windows.SetConsoleMode(hStdOut, originalMode)
+        windows.ExitProcess(1)
+    }
+    return windows.FALSE
 }
