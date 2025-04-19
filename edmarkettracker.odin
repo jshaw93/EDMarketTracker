@@ -9,6 +9,7 @@ import "core:encoding/json"
 import "core:mem"
 import vmem "core:mem/virtual"
 import "core:slice"
+import "core:sys/windows"
 
 DockedEvent :: struct {
     timestamp : string,
@@ -48,6 +49,18 @@ Pads :: struct{
 }
 
 main :: proc() {
+    // Enable virtual terminal processing
+    hStdOut := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+    mode : windows.DWORD = 0
+    if !windows.GetConsoleMode(hStdOut, &mode) do return
+    originalMode : windows.DWORD = mode
+    mode |= windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    if !windows.SetConsoleMode(hStdOut, mode) do return
+    defer windows.SetConsoleMode(hStdOut, originalMode)
+
+    // Clear console & return cursor to 0, 0
+    fmt.println("\x1b[2J\x1b[H")
+
     fmt.println("ED Market Tracker is now running!\n")
 
     arena : vmem.Arena
@@ -153,9 +166,7 @@ main :: proc() {
 
     if len(last) > 0 {
         dEvent = deserializeDockedEvent(last, arenaAlloc)
-        
-        modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-        if modified && !checkAvoid(dEvent.StationName) {
+        if !checkAvoid(dEvent.StationName) {
             printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
             dockedEvents[dEvent.StationName] = dEvent
             writeErr := writeData(dockedEvents, arenaAlloc)
@@ -175,8 +186,7 @@ main :: proc() {
         for line in newDataLines {
             if !strings.contains(line, "\"event\":\"Docked\"") do continue
             dEvent = deserializeDockedEvent(line, arenaAlloc)
-            modified = isMarketModified(dEvent.StationEconomies, dockedEvents[dEvent.StationName].StationEconomies)
-            if modified && !checkAvoid(dEvent.StationName) {
+            if !checkAvoid(dEvent.StationName) {
                 printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                 dockedEvents[dEvent.StationName] = dEvent
                 writeErr := writeData(dockedEvents, arenaAlloc)
@@ -188,6 +198,8 @@ main :: proc() {
 }
 
 printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
+    // Clear console & return cursor to 0, 0
+    fmt.println("\x1b[2J\x1b[H")
     // Read out Market values from docked event struct
     fmt.println("Old Market values for", dEvent.StationName, "\b:")
     if len(historic) > 0 {
@@ -224,10 +236,6 @@ writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.al
         return 2
     }
     return 0
-}
-
-isMarketModified :: proc(newMarket, historicMarket : []Economy) -> bool {
-    return !slice.equal(newMarket, historicMarket)
 }
 
 checkAvoid :: proc(stationName : string)  -> bool {
