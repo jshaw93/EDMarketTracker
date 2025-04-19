@@ -58,10 +58,11 @@ main :: proc() {
     if !windows.SetConsoleMode(hStdOut, mode) do return
     defer windows.SetConsoleMode(hStdOut, originalMode)
 
+    // Set ANSI mode
+    fmt.print("\x1b[=14h")
+
     // Clear console & return cursor to 0, 0
     fmt.println("\x1b[2J\x1b[H")
-
-    fmt.println("ED Market Tracker is now running!\n")
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
@@ -198,20 +199,30 @@ main :: proc() {
 }
 
 printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
-    // Clear console & return cursor to 0, 0
-    fmt.println("\x1b[2J\x1b[H")
+    // Clear console, return cursor to 0, 0, set color
+    fmt.print("\x1b[3J\x1b[H\x1b[38;5;208m")
+    printArt()
+    fmt.println("=======================================")
     // Read out Market values from docked event struct
-    fmt.println("Old Market values for", dEvent.StationName, "\b:")
-    if len(historic) > 0 {
-        for market in historic {
-            fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
+    if isMarketModified(dEvent.StationEconomies, historic) {
+        fmt.println("\x1b[2K  Old Market values for", dEvent.StationName, "\b:")
+        if len(historic) > 0 {
+            for market in historic {
+                fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+            }
+        } else do fmt.println("    None")
+        fmt.println("\x1b[2K  New Market Types for", dEvent.StationName, "\b:")
+        for market in dEvent.StationEconomies {
+            fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
         }
-    } else do fmt.println("    None")
-    fmt.println("New Market Types for", dEvent.StationName, "\b:")
-    for market in dEvent.StationEconomies {
-        fmt.printfln("    %s: %.2f", market.Name_Localised, market.Proportion)
+    } else {
+        fmt.println("\x1b[2K  Market values for", dEvent.StationName, "\b:")
+        for market in dEvent.StationEconomies {
+            fmt.printfln("\x1b[2K    %s: %.2f", market.Name_Localised, market.Proportion)
+        }
     }
     fmt.println("=======================================")
+    fmt.print("\x1b[38;5;7m") // Reset color
 }
 
 deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> DockedEvent {
@@ -236,6 +247,10 @@ writeData :: proc(dockedEvents : map[string]DockedEvent, allocator := context.al
         return 2
     }
     return 0
+}
+
+isMarketModified :: proc(newMarket, historicMarket : []Economy) -> bool {
+    return !slice.equal(newMarket, historicMarket)
 }
 
 checkAvoid :: proc(stationName : string)  -> bool {
@@ -264,4 +279,13 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
         return baseConfig, 2
     }
     return baseConfig, 0
+}
+
+printArt :: proc() {
+    fmt.println(" ______ _____    __  __            _        _     _______             _             ")
+    fmt.println("|  ____|  __ \\  |  \\/  |          | |      | |   |__   __|           | |            ")
+    fmt.println("| |__  | |  | | | \\  / | __ _ _ __| | _____| |_     | |_ __ __ _  ___| | _____ _ __ ")
+    fmt.println("|  __| | |  | | | |\\/| |/ _` | '__| |/ / _ \\ __|    | | '__/ _` |/ __| |/ / _ \\ '__|")
+    fmt.println("| |____| |__| | | |  | | (_| | |  |   <  __/ |_     | | | | (_| | (__|   <  __/ |   ")
+    fmt.println("|______|_____/  |_|  |_|\\__,_|_|  |_|\\_\\___|\\__|    |_|_|  \\__,_|\\___|_|\\_\\___|_|   ")
 }
