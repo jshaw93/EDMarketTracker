@@ -196,6 +196,12 @@ main :: proc() {
         newData : string = string(buff[:])
         newDataLines : []string = strings.split(newData, "\r\n", arenaAlloc)
         for line in newDataLines {
+            // Check for game shutdown, cleanly close program
+            if strings.contains(line, "\"event\":\"Shutdown\"") {
+                fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h")
+                windows.SetConsoleMode(hStdOut, originalMode)
+                return
+            }
             if !strings.contains(line, "\"event\":\"Docked\"") do continue
             dEvent = deserializeDockedEvent(line, arenaAlloc)
             if !checkAvoid(dEvent.StationName) {
