@@ -96,7 +96,7 @@ main :: proc() {
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
-    if allocErr != nil do panic("Allocation Error at line 80")
+    if allocErr != nil do panic("Allocation Error at line 98")
     defer vmem.arena_destroy(&arena)
     arenaAlloc := vmem.arena_allocator(&arena)
 
@@ -108,19 +108,19 @@ main :: proc() {
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
         if mErr != nil {
-            fmt.println("Marshall Error on line 91:", mErr)
+            fmt.println("Marshall Error on line 109:", mErr)
             return
         }
         success := os.write_entire_file("marketdata.json", mData)
         if !success {
-            fmt.println("Failed to write marketdata.json on line 96")
+            fmt.println("Failed to write marketdata.json on line 113")
             return
         }
     } else {
         jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 103:", umErr)
+            fmt.println("Unmarshall Error at line 121:", umErr)
             return
         }
     }
@@ -137,7 +137,7 @@ main :: proc() {
         configRaw, success := os.read_entire_file_from_filename("config.json", arenaAlloc)
         umErr := json.unmarshal(configRaw, &config, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 120:", umErr)
+            fmt.println("Unmarshall Error at line 138:", umErr)
             return
         }
     }
@@ -175,7 +175,7 @@ main :: proc() {
     if readErr != nil {
         fmt.println("Configured Journal Directory:", logPath)
         fmt.println("Does", latest.fullpath, "exist?")
-        fmt.println("Read error at line 157, missing file")
+        fmt.println("Read error at line 174, missing file")
         return
     }
     defer os.close(logHandle)
@@ -201,61 +201,79 @@ main :: proc() {
     dEvent : DockedEvent
     cEvent : CCDepotEvent
 
-    // if len(lastDocked) > 0 {
-    //     dEvent = deserializeDockedEvent(lastDocked, arenaAlloc)
-    //     if !checkAvoid(dEvent.StationName) {
-    //         printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
-    //         dockedEvents[dEvent.StationName] = dEvent
-    //         writeErr := writeMarketData(dockedEvents, arenaAlloc)
-    //         if writeErr != 0 do return
-    //     }
-    // }
-
-    if len(lastCCDepot) > 0 {
-        fmt.println("=======================================")
-        cEvent = deserializeCCDepotEvent(lastCCDepot, arenaAlloc)
-        r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
-        fmt.println(cEvent.event, cEvent.MarketID, findMarketName(cEvent.MarketID, dockedEvents))
-        r := soa_zip(left=r1, right=r2)
-        for resource in r {
-            fmt.printf("%-25s: %v/%v", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount)
-            fmt.printf("%10s", "\t")
-            fmt.printfln("%-25s: %v/%v", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount)
+    if len(lastDocked) > 0 {
+        dEvent = deserializeDockedEvent(lastDocked, arenaAlloc)
+        if !checkAvoid(dEvent.StationName) {
+            printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
+            dockedEvents[dEvent.StationName] = dEvent
+            writeErr := writeMarketData(dockedEvents, arenaAlloc)
+            if writeErr != 0 do return
         }
     }
 
+    if len(lastCCDepot) > 0 {
+        marketName : string = "No market name found"
+        cEvent = deserializeCCDepotEvent(lastCCDepot, arenaAlloc)
+        r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
+        fmt.println(cEvent.event, cEvent.MarketID, marketName)
+        r := soa_zip(left=r1, right=r2)
+        for resource in r {
+            fmt.printf("%-25s: %v/%v (%v)", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, resource.left.RequiredAmount - resource.left.ProvidedAmount)
+            fmt.printf("%8s", "\t")
+            fmt.printfln("%-25s: %v/%v (%v)", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, resource.right.RequiredAmount - resource.right.ProvidedAmount)
+        }
+        fmt.println("=======================================")
+    }
+
     fileStat, _ := os.stat(latest.fullpath, arenaAlloc)
-    // for {
-    //     time.sleep(time.Second)
-    //     current, _ := os.stat(latest.fullpath, arenaAlloc)
-    //     if current.modification_time == fileStat.modification_time do continue
-    //     diff : i64 = current.size - fileStat.size
-    //     buff : [mem.Kilobyte*12]byte
-    //     newBytesRead, rErr := os.read_at(logHandle, buff[:], current.size - diff)
-    //     newData : string = string(buff[:])
-    //     newDataLines : []string = strings.split(newData, "\r\n", arenaAlloc)
-    //     for line in newDataLines {
-    //         // Check for game shutdown, cleanly close program
-    //         if strings.contains(line, "\"event\":\"Shutdown\"") do return
-    //         if strings.contains(line, "\"event\":\"Docked\"") {
-    //             dEvent = deserializeDockedEvent(line, arenaAlloc)
-    //             if !checkAvoid(dEvent.StationName) {
-    //                 printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
-    //                 dockedEvents[dEvent.StationName] = dEvent
-    //                 writeErr := writeMarketData(dockedEvents, arenaAlloc)
-    //                 if writeErr != 0 do return
-    //             }
-    //         }
-    //     }
-    //     fileStat = current
-    // }
+    latestDocked : DockedEvent
+    for {
+        time.sleep(time.Second)
+        current, _ := os.stat(latest.fullpath, arenaAlloc)
+        if current.modification_time == fileStat.modification_time do continue
+        diff : i64 = current.size - fileStat.size
+        buff : [mem.Kilobyte*12]byte
+        newBytesRead, rErr := os.read_at(logHandle, buff[:], current.size - diff)
+        newData : string = string(buff[:])
+        newDataLines : []string = strings.split(newData, "\r\n", arenaAlloc)
+        for line in newDataLines {
+            // Check for game shutdown, cleanly close program
+            if strings.contains(line, "\"event\":\"Shutdown\"") do return
+            if strings.contains(line, "\"event\":\"Docked\"") {
+                dEvent = deserializeDockedEvent(line, arenaAlloc)
+                latestDocked = dEvent
+                if !checkAvoid(dEvent.StationName) {
+                    printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
+                    dockedEvents[dEvent.StationName] = dEvent
+                    writeErr := writeMarketData(dockedEvents, arenaAlloc)
+                    if writeErr != 0 do return
+                }
+            }
+            if strings.contains(line, "\"event\":\"ColonisationConstructionDepot\"") {
+                marketName : string = "No market name found"
+                if latestDocked.StationName != "" do marketName = latestDocked.StationName
+                fmt.print("\x1b[3J\x1b[H\x1b[J")
+                printArt()
+                cEvent = deserializeCCDepotEvent(line, arenaAlloc)
+                fmt.println(cEvent.event, cEvent.MarketID, marketName)
+                r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
+                r := soa_zip(left=r1, right=r2)
+                for resource in r {
+                    fmt.printf("%-25s: %v/%v (%v)", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, resource.left.RequiredAmount - resource.left.ProvidedAmount)
+                    fmt.printf("%8s", "\t")
+                    fmt.printfln("%-25s: %v/%v (%v)", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, resource.right.RequiredAmount - resource.right.ProvidedAmount)
+                }
+                fmt.println("=======================================")
+            }
+        }
+        fileStat = current
+    }
 }
 
 printEconomies :: proc(dEvent : DockedEvent, historic : []Economy) {
     // Return cursor to 0, 0, then clear the terminal
     fmt.print("\x1b[3J\x1b[H\x1b[J")
     printArt()
-    fmt.println("=======================================")
     // Read out Market values from docked event struct
     if isMarketModified(dEvent.StationEconomies, historic) {
         fmt.println("  Old Market values for", dEvent.StationName, "\b:")
@@ -281,7 +299,7 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 247")
+    if uErr != nil do panic("Unmarshall error at line 301")
     return dEvent
 }
 
@@ -289,7 +307,10 @@ deserializeCCDepotEvent :: proc(line : string, allocator := context.allocator) -
     // Deserialize CCDepot Event
     cEvent : CCDepotEvent
     uErr := json.unmarshal_string(line, &cEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 277")
+    if uErr != nil {
+        fmt.println(uErr)
+        panic("Unmarshall error at line 309")
+    }
     return cEvent
 }
 
@@ -298,12 +319,12 @@ writeMarketData :: proc(dockedEvents : map[string]DockedEvent, allocator := cont
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
     if mErr != nil {
-        fmt.println("Marshall Err on line 255:", mErr)
+        fmt.println("Marshall Err on line 320:", mErr)
         return 1
     }
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success {
-        fmt.println("Failed to write marketdata.json at line 260")
+        fmt.println("Failed to write marketdata.json at line 325")
         return 2
     }
     return 0
@@ -330,12 +351,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 287:", mErr)
+        fmt.println("Marshall Error on line 352:", mErr)
         return baseConfig, 1
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 292")
+        fmt.println("Failed to write config.json on line 357")
         return baseConfig, 2
     }
     return baseConfig, 0
@@ -348,6 +369,7 @@ printArt :: proc() {
     fmt.println("|  __| | |  | | | |\\/| |/ _` | '__| |/ / _ \\ __|    | | '__/ _` |/ __| |/ / _ \\ '__|")
     fmt.println("| |____| |__| | | |  | | (_| | |  |   <  __/ |_     | | | | (_| | (__|   <  __/ |   ")
     fmt.println("|______|_____/  |_|  |_|\\__,_|_|  |_|\\_\\___|\\__|    |_|_|  \\__,_|\\___|_|\\_\\___|_|   ")
+    fmt.println("=======================================")
 }
 
 handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
@@ -360,11 +382,4 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
         windows.ExitProcess(1)
     }
     return windows.FALSE
-}
-
-findMarketName :: proc(marketID : i64, dEvents : map[string]DockedEvent) -> string {
-    for event in dEvents {
-        if dEvents[event].MarketID == marketID do return event
-    }
-    return "No market name found"
 }
