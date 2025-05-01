@@ -82,7 +82,7 @@ main :: proc() {
 
     defer {
         // Reset ANSI and terminal mode on clean app close
-        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h")
+        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h\x1b[48;5;0m")
         windows.SetConsoleMode(hStdOut, originalMode)
     }
 
@@ -214,19 +214,12 @@ main :: proc() {
     if len(lastCCDepot) > 0 {
         marketName : string = "No market name found"
         cEvent = deserializeCCDepotEvent(lastCCDepot, arenaAlloc)
-        r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
-        fmt.println(cEvent.event, cEvent.MarketID, marketName)
-        r := soa_zip(left=r1, right=r2)
-        for resource in r {
-            fmt.printf("%-25s: %v/%v (%v)", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, resource.left.RequiredAmount - resource.left.ProvidedAmount)
-            fmt.printf("%8s", "\t")
-            fmt.printfln("%-25s: %v/%v (%v)", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, resource.right.RequiredAmount - resource.right.ProvidedAmount)
-        }
-        fmt.println("=======================================")
+        printCCDEvent(cEvent, marketName)
     }
 
     fileStat, _ := os.stat(latest.fullpath, arenaAlloc)
     latestDocked : DockedEvent
+    latestCCDEvent : CCDepotEvent
     for {
         time.sleep(time.Second)
         current, _ := os.stat(latest.fullpath, arenaAlloc)
@@ -241,13 +234,14 @@ main :: proc() {
             if strings.contains(line, "\"event\":\"Shutdown\"") do return
             if strings.contains(line, "\"event\":\"Docked\"") {
                 dEvent = deserializeDockedEvent(line, arenaAlloc)
-                latestDocked = dEvent
                 if !checkAvoid(dEvent.StationName) {
                     printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                     dockedEvents[dEvent.StationName] = dEvent
                     writeErr := writeMarketData(dockedEvents, arenaAlloc)
                     if writeErr != 0 do return
+                    if latestCCDEvent.event != "" do printCCDEvent(latestCCDEvent, latestDocked.StationName)
                 }
+                if checkAvoid(dEvent.StationName) do latestDocked = dEvent
             }
             if strings.contains(line, "\"event\":\"ColonisationConstructionDepot\"") {
                 marketName : string = "No market name found"
@@ -255,15 +249,8 @@ main :: proc() {
                 fmt.print("\x1b[3J\x1b[H\x1b[J")
                 printArt()
                 cEvent = deserializeCCDepotEvent(line, arenaAlloc)
-                fmt.println(cEvent.event, cEvent.MarketID, marketName)
-                r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
-                r := soa_zip(left=r1, right=r2)
-                for resource in r {
-                    fmt.printf("%-25s: %v/%v (%v)", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, resource.left.RequiredAmount - resource.left.ProvidedAmount)
-                    fmt.printf("%8s", "\t")
-                    fmt.printfln("%-25s: %v/%v (%v)", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, resource.right.RequiredAmount - resource.right.ProvidedAmount)
-                }
-                fmt.println("=======================================")
+                printCCDEvent(cEvent, marketName)
+                latestCCDEvent = cEvent
             }
         }
         fileStat = current
@@ -299,7 +286,7 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 301")
+    if uErr != nil do panic("Unmarshall error at line 285")
     return dEvent
 }
 
@@ -309,7 +296,7 @@ deserializeCCDepotEvent :: proc(line : string, allocator := context.allocator) -
     uErr := json.unmarshal_string(line, &cEvent, allocator=allocator)
     if uErr != nil {
         fmt.println(uErr)
-        panic("Unmarshall error at line 309")
+        panic("Unmarshall error at line 293")
     }
     return cEvent
 }
@@ -319,12 +306,12 @@ writeMarketData :: proc(dockedEvents : map[string]DockedEvent, allocator := cont
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
     if mErr != nil {
-        fmt.println("Marshall Err on line 320:", mErr)
+        fmt.println("Marshall Err on line 304:", mErr)
         return 1
     }
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success {
-        fmt.println("Failed to write marketdata.json at line 325")
+        fmt.println("Failed to write marketdata.json at line 309")
         return 2
     }
     return 0
@@ -351,12 +338,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 352:", mErr)
+        fmt.println("Marshall Error on line 336:", mErr)
         return baseConfig, 1
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 357")
+        fmt.println("Failed to write config.json on line 341")
         return baseConfig, 2
     }
     return baseConfig, 0
@@ -377,9 +364,32 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
     ctx : runtime.Context = runtime.default_context()
     context = ctx
     if signal == windows.CTRL_C_EVENT {
-        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h")
+        fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h\x1b[48;5;0m")
         windows.SetConsoleMode(hStdOut, originalMode)
         windows.ExitProcess(1)
     }
     return windows.FALSE
+}
+
+printCCDEvent :: proc(cEvent : CCDepotEvent, marketName : string) {
+    fmt.printfln("  %s %v %s : %.2f%% Complete", cEvent.event, cEvent.MarketID, marketName, cEvent.ConstructionProgress * 100)
+    r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
+    r := soa_zip(left=r1, right=r2)
+    for resource in r {
+        leftDiff := resource.left.RequiredAmount - resource.left.ProvidedAmount
+        rightDiff := resource.right.RequiredAmount - resource.right.ProvidedAmount
+        // Else: Format completed hauls with green background
+        if leftDiff > 0 {
+            fmt.printf("    %-25s: %v/%v (%v)", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, leftDiff)
+        } else {
+            fmt.printf("    \x1b[48;5;22m%-25s: %v/%v (%v)\x1b[48;5;0m", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, leftDiff)
+        }
+        fmt.printf("%10s", "\t")
+        if rightDiff > 0 {
+            fmt.printfln("    %-25s: %v/%v (%v)", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, rightDiff)
+        } else {
+            fmt.printfln("    \x1b[48;5;22m%-25s: %v/%v (%v)\x1b[48;5;0m", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, rightDiff)
+        }
+    }
+    fmt.println("=======================================")
 }
