@@ -1,5 +1,5 @@
 *.exe
 ols.json
 release*
-build.bat
+*.bat
 *.json
