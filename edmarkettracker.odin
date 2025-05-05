@@ -11,6 +11,8 @@ import vmem "core:mem/virtual"
 import "core:slice"
 import "core:sys/windows"
 import "base:runtime"
+import "core:strconv"
+import "core:unicode/utf8"
 
 DockedEvent :: struct {
     timestamp : string,
@@ -96,7 +98,7 @@ main :: proc() {
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
-    if allocErr != nil do panic("Allocation Error at line 98")
+    if allocErr != nil do panic("Allocation Error at line 100")
     defer vmem.arena_destroy(&arena)
     arenaAlloc := vmem.arena_allocator(&arena)
 
@@ -108,19 +110,19 @@ main :: proc() {
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
         if mErr != nil {
-            fmt.println("Marshall Error on line 109:", mErr)
+            fmt.println("Marshall Error on line 111:", mErr)
             return
         }
         success := os.write_entire_file("marketdata.json", mData)
         if !success {
-            fmt.println("Failed to write marketdata.json on line 113")
+            fmt.println("Failed to write marketdata.json on line 116")
             return
         }
     } else {
         jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 121:", umErr)
+            fmt.println("Unmarshall Error at line 123:", umErr)
             return
         }
     }
@@ -137,7 +139,7 @@ main :: proc() {
         configRaw, success := os.read_entire_file_from_filename("config.json", arenaAlloc)
         umErr := json.unmarshal(configRaw, &config, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 138:", umErr)
+            fmt.println("Unmarshall Error at line 140:", umErr)
             return
         }
     }
@@ -146,7 +148,7 @@ main :: proc() {
     logPath : string = config["JournalDirectory"]
     handle, err := os.open(logPath)
     if err != nil {
-        fmt.println("Open error line 129:", err)
+        fmt.println("Open error line 149:", err)
         return
     }
     defer os.close(handle)
@@ -175,7 +177,7 @@ main :: proc() {
     if readErr != nil {
         fmt.println("Configured Journal Directory:", logPath)
         fmt.println("Does", latest.fullpath, "exist?")
-        fmt.println("Read error at line 174, missing file")
+        fmt.println("Read error at line 176, missing file")
         return
     }
     defer os.close(logHandle)
@@ -249,7 +251,7 @@ main :: proc() {
                 fmt.print("\x1b[3J\x1b[H\x1b[J")
                 printArt()
                 cEvent = deserializeCCDepotEvent(line, arenaAlloc)
-                printCCDEvent(cEvent, marketName)
+                printCCDEvent(cEvent, marketName, arenaAlloc)
                 latestCCDEvent = cEvent
             }
         }
@@ -286,7 +288,7 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 285")
+    if uErr != nil do panic("Unmarshall error at line 290")
     return dEvent
 }
 
@@ -296,7 +298,7 @@ deserializeCCDepotEvent :: proc(line : string, allocator := context.allocator) -
     uErr := json.unmarshal_string(line, &cEvent, allocator=allocator)
     if uErr != nil {
         fmt.println(uErr)
-        panic("Unmarshall error at line 293")
+        panic("Unmarshall error at line 298")
     }
     return cEvent
 }
@@ -306,12 +308,12 @@ writeMarketData :: proc(dockedEvents : map[string]DockedEvent, allocator := cont
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
     if mErr != nil {
-        fmt.println("Marshall Err on line 304:", mErr)
+        fmt.println("Marshall Err on line 309:", mErr)
         return 1
     }
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success {
-        fmt.println("Failed to write marketdata.json at line 309")
+        fmt.println("Failed to write marketdata.json at line 314")
         return 2
     }
     return 0
@@ -338,12 +340,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 336:", mErr)
+        fmt.println("Marshall Error on line 341:", mErr)
         return baseConfig, 1
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 341")
+        fmt.println("Failed to write config.json on line 346")
         return baseConfig, 2
     }
     return baseConfig, 0
@@ -371,25 +373,109 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
     return windows.FALSE
 }
 
-printCCDEvent :: proc(cEvent : CCDepotEvent, marketName : string) {
+printCCDEvent :: proc(cEvent : CCDepotEvent, marketName : string, allocator := context.allocator) {
     fmt.printfln("  %s %v %s : %.2f%% Complete", cEvent.event, cEvent.MarketID, marketName, cEvent.ConstructionProgress * 100)
     r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
     r := soa_zip(left=r1, right=r2)
     for resource in r {
-        leftDiff := resource.left.RequiredAmount - resource.left.ProvidedAmount
-        rightDiff := resource.right.RequiredAmount - resource.right.ProvidedAmount
-        // Else: Format completed hauls with green background
-        if leftDiff > 0 {
-            fmt.printf("    %-25s: %v/%v (%v)", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, leftDiff)
-        } else {
-            fmt.printf("    \x1b[48;5;22m%-25s: %v/%v (%v)\x1b[48;5;0m", resource.left.Name_Localised, resource.left.ProvidedAmount, resource.left.RequiredAmount, leftDiff)
-        }
-        fmt.printf("%10s", "\t")
-        if rightDiff > 0 {
-            fmt.printfln("    %-25s: %v/%v (%v)", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, rightDiff)
-        } else {
-            fmt.printfln("    \x1b[48;5;22m%-25s: %v/%v (%v)\x1b[48;5;0m", resource.right.Name_Localised, resource.right.ProvidedAmount, resource.right.RequiredAmount, rightDiff)
-        }
+        fmt.println(formatCCDEventResource(resource, allocator))
     }
     fmt.println("=======================================")
+}
+
+// Dynamically format CCDEvent Resource #soa array into a single line string
+// Highlight section green if the haul for a specific resource has been finished for
+// the last construction site landed at.
+formatCCDEventResource :: proc(resource : struct {left,right:Resource}, allocator := context.allocator) -> string {
+    leftDiff := resource.left.RequiredAmount - resource.left.ProvidedAmount
+    rightDiff := resource.right.RequiredAmount - resource.right.ProvidedAmount
+    leftProvided : string = itoa(resource.left.ProvidedAmount, allocator)
+    leftRequired : string = itoa(resource.left.RequiredAmount, allocator)
+    leftDiffStr : string = itoa(leftDiff, allocator)
+    rightProvided : string = itoa(resource.right.ProvidedAmount, allocator)
+    rightRequired : string = itoa(resource.right.RequiredAmount, allocator)
+    rightDiffStr : string = itoa(rightDiff, allocator)
+    leftLine, rightLine : string
+    leftLineClean : string
+    leftFront : string = strings.concatenate({"    ", resource.left.Name_Localised}, allocator)
+    beforeColonRunes : [dynamic]rune
+    defer delete(beforeColonRunes)
+    for _ in 0..< 30 - len(leftFront) {
+        append(&beforeColonRunes, ' ')
+    }
+    beforeColonLeft : string = utf8.runes_to_string(beforeColonRunes[:], allocator)
+    strArrayClean : []string = {
+        leftFront,
+        beforeColonLeft,
+        ": ",
+        leftProvided,
+        "/",
+        leftRequired,
+        " (",
+        leftDiffStr,
+        ")"
+    }
+    leftLineClean = strings.concatenate(strArrayClean[:], allocator)    
+    if leftDiff > 0 {
+        leftLine = leftLineClean
+    } else {
+        strArray : []string = {
+            "\x1b[48;5;22m",
+            leftFront,
+            beforeColonLeft,
+            ": ",
+            leftProvided,
+            "/",
+            leftRequired,
+            " (",
+            leftDiffStr,
+            ")",
+            "\x1b[48;5;0m"
+        }
+        leftLine = strings.concatenate(strArray[:], allocator)
+    }
+    clear(&beforeColonRunes)
+    for _ in 0..< 55 - len(leftLineClean) do append(&beforeColonRunes, ' ')
+    beforeRight : string = utf8.runes_to_string(beforeColonRunes[:], allocator)
+    clear(&beforeColonRunes)
+    for _ in 0..< 30 - len(resource.right.Name_Localised) do append(&beforeColonRunes, ' ')
+    if rightDiff > 0 {
+        strArray : []string = {
+            beforeRight,
+            resource.right.Name_Localised,
+            utf8.runes_to_string(beforeColonRunes[:], allocator),
+            ": ",
+            rightProvided,
+            "/",
+            rightRequired,
+            " (",
+            rightDiffStr,
+            ")"
+        }
+        rightLine = strings.concatenate(strArray[:], allocator)
+    } else {
+        strArray : []string = {
+            beforeRight,
+            "\x1b[48;5;22m",
+            resource.right.Name_Localised,
+            utf8.runes_to_string(beforeColonRunes[:], allocator),
+            ": ",
+            rightProvided,
+            "/",
+            rightRequired,
+            " (",
+            rightDiffStr,
+            ")",
+            "\x1b[48;5;0m"
+        }
+        rightLine = strings.concatenate(strArray[:], allocator)
+    }
+    finalLine : string = strings.concatenate({leftLine, rightLine}, allocator)
+    return finalLine
+}
+
+itoa :: proc(number : i32, allocator := context.allocator) -> string {
+    buffer := make([]byte, 256, allocator)
+    str : string = strconv.itoa(buffer[:], int(number))
+    return str
 }
