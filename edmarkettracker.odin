@@ -160,7 +160,7 @@ main :: proc() {
         modTime, _ := time.time_to_datetime(i.modification_time)
         now, _ := time.time_to_datetime(time.now())
         delta, _ := datetime.subtract_datetimes(now, modTime)
-        if delta.days > 1 do continue
+        if delta.days > 5 do continue
         if delta.days < latestDelta.days {
             latestDelta = delta
             latest = i
@@ -178,6 +178,7 @@ main :: proc() {
         fmt.println("Configured Journal Directory:", logPath)
         fmt.println("Does", latest.fullpath, "exist?")
         fmt.println("Read error at line 176, missing file")
+        fmt.printfln("Read error: %s", readErr)
         return
     }
     defer os.close(logHandle)
