@@ -152,7 +152,7 @@ main :: proc() {
         return
     }
     defer os.close(handle)
-    fileInfos, fErr := os.read_dir(handle, 256, arenaAlloc)
+    fileInfos, fErr := os.read_dir(handle, 8192, arenaAlloc)
     latest : os.File_Info
     latestDelta : datetime.Delta = {0x7fffffffffffffff, 0x7fffffffffffffff, 0}
     for i in fileInfos {
@@ -179,6 +179,7 @@ main :: proc() {
         fmt.println("Does", latest.fullpath, "exist?")
         fmt.println("Read error at line 176, missing file")
         fmt.printfln("Read error: %s", readErr)
+        fmt.println("Len FileInfos:", len(fileInfos))
         return
     }
     defer os.close(logHandle)
