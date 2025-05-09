@@ -290,7 +290,7 @@ deserializeDockedEvent :: proc(line: string, allocator := context.allocator) -> 
     // Deserialize Docked Event
     dEvent : DockedEvent
     uErr := json.unmarshal_string(line, &dEvent, allocator=allocator)
-    if uErr != nil do panic("Unmarshall error at line 290")
+    if uErr != nil do panic("Unmarshall error at line 292")
     return dEvent
 }
 
@@ -300,7 +300,7 @@ deserializeCCDepotEvent :: proc(line : string, allocator := context.allocator) -
     uErr := json.unmarshal_string(line, &cEvent, allocator=allocator)
     if uErr != nil {
         fmt.println(uErr)
-        panic("Unmarshall error at line 298")
+        panic("Unmarshall error at line 300")
     }
     return cEvent
 }
@@ -310,12 +310,12 @@ writeMarketData :: proc(dockedEvents : map[string]DockedEvent, allocator := cont
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
     if mErr != nil {
-        fmt.println("Marshall Err on line 309:", mErr)
+        fmt.println("Marshall Err on line 311:", mErr)
         return 1
     }
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success {
-        fmt.println("Failed to write marketdata.json at line 314")
+        fmt.println("Failed to write marketdata.json at line 316")
         return 2
     }
     return 0
@@ -342,12 +342,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 341:", mErr)
+        fmt.println("Marshall Error on line 343:", mErr)
         return baseConfig, 1
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 346")
+        fmt.println("Failed to write config.json on line 348")
         return baseConfig, 2
     }
     return baseConfig, 0
