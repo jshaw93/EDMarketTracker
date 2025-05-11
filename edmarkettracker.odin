@@ -382,6 +382,9 @@ printCCDEvent :: proc(cEvent : CCDepotEvent, marketName : string, allocator := c
     for resource in r {
         fmt.println(formatCCDEventResource(resource, allocator))
     }
+    if len(r2) > len(r1) {
+        fmt.printfln(formatCCDEventResourceSingle(r2[len(r2)-1]))
+    }
     fmt.println("=======================================")
 }
 
@@ -474,6 +477,50 @@ formatCCDEventResource :: proc(resource : struct {left,right:Resource}, allocato
     }
     finalLine : string = strings.concatenate({leftLine, rightLine}, allocator)
     return finalLine
+}
+
+formatCCDEventResourceSingle :: proc(resource : Resource, allocator := context.allocator) -> string {
+    diff := resource.RequiredAmount - resource.ProvidedAmount
+    provided : string = itoa(resource.ProvidedAmount, allocator)
+    required : string = itoa(resource.RequiredAmount, allocator)
+    diffStr : string = itoa(diff, allocator)
+    front : string = strings.concatenate({"    ", resource.Name_Localised}, allocator)
+    beforeColonRunes : [dynamic]rune
+    defer delete(beforeColonRunes)
+    for _ in 0..< 30 - len(front) do append(&beforeColonRunes, ' ')
+    line, lineClean : string
+    beforeColon : string = utf8.runes_to_string(beforeColonRunes[:], allocator)
+    strArrayClean : []string = {
+        front,
+        beforeColon,
+        ": ",
+        provided,
+        "/",
+        required,
+        " (",
+        diffStr,
+        ")"
+    }
+    lineClean = strings.concatenate(strArrayClean[:], allocator)
+    if diff > 0 {
+        line = lineClean
+    } else {
+        strArray : []string = {
+            "\x1b[48;5;22m",
+            front,
+            beforeColon,
+            ": ",
+            provided,
+            "/",
+            required,
+            " (",
+            diffStr,
+            ")",
+            "\x1b[48;5;0m"
+        }
+        line = strings.concatenate(strArray[:], allocator)
+    }
+    return line
 }
 
 itoa :: proc(number : i32, allocator := context.allocator) -> string {
