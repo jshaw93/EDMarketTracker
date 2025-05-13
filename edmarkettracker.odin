@@ -376,14 +376,16 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
 }
 
 printCCDEvent :: proc(cEvent : CCDepotEvent, marketName : string, allocator := context.allocator) {
-    fmt.printfln("  %s %v %s : %.2f%% Complete", cEvent.event, cEvent.MarketID, marketName, cEvent.ConstructionProgress * 100)
+    fmt.printfln("  %s %v %s : %.2f%% Complete\n", cEvent.event, cEvent.MarketID, marketName, cEvent.ConstructionProgress * 100)
     r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
     r := soa_zip(left=r1, right=r2)
     for resource in r {
-        fmt.println(formatCCDEventResource(resource, allocator))
+        fmt.println(formatCCDEventResourceSOAZip(resource, allocator))
     }
     if len(r2) > len(r1) {
-        fmt.printfln(formatCCDEventResourceSingle(r2[len(r2)-1]))
+        line, _ := formatCCDEventResourceSingle(r2[len(r2)-1])
+        line = strings.concatenate({"    ", line}, allocator)
+        fmt.printfln(line)
     }
     fmt.println("=======================================")
 }
@@ -391,104 +393,32 @@ printCCDEvent :: proc(cEvent : CCDepotEvent, marketName : string, allocator := c
 // Dynamically format CCDEvent Resource #soa array into a single line string
 // Highlight section green if the haul for a specific resource has been finished for
 // the last construction site landed at.
-formatCCDEventResource :: proc(resource : struct {left,right:Resource}, allocator := context.allocator) -> string {
-    leftDiff := resource.left.RequiredAmount - resource.left.ProvidedAmount
-    rightDiff := resource.right.RequiredAmount - resource.right.ProvidedAmount
-    leftProvided : string = itoa(resource.left.ProvidedAmount, allocator)
-    leftRequired : string = itoa(resource.left.RequiredAmount, allocator)
-    leftDiffStr : string = itoa(leftDiff, allocator)
-    rightProvided : string = itoa(resource.right.ProvidedAmount, allocator)
-    rightRequired : string = itoa(resource.right.RequiredAmount, allocator)
-    rightDiffStr : string = itoa(rightDiff, allocator)
-    leftLine, rightLine : string
-    leftLineClean : string
-    leftFront : string = strings.concatenate({"    ", resource.left.Name_Localised}, allocator)
-    beforeColonRunes : [dynamic]rune
-    defer delete(beforeColonRunes)
-    for _ in 0..< 30 - len(leftFront) {
-        append(&beforeColonRunes, ' ')
+formatCCDEventResourceSOAZip :: proc(resourceSOA : struct {left,right:Resource}, allocator := context.allocator) -> string {
+    leftLine, leftLineClean := formatCCDEventResourceSingle(resourceSOA.left, allocator)
+    leftLine = strings.concatenate({"    ", leftLine}, allocator)
+    rightLine, _ := formatCCDEventResourceSingle(resourceSOA.right, allocator)
+    beforeResourceRunes := make([dynamic]rune, allocator)
+    defer delete(beforeResourceRunes)
+    for _ in 0..< 55 - len(leftLineClean) do append(&beforeResourceRunes, ' ')
+    beforeRight : string = utf8.runes_to_string(beforeResourceRunes[:], allocator)
+    strArray : []string = {
+        beforeRight,
+        rightLine
     }
-    beforeColonLeft : string = utf8.runes_to_string(beforeColonRunes[:], allocator)
-    strArrayClean : []string = {
-        leftFront,
-        beforeColonLeft,
-        ": ",
-        leftProvided,
-        "/",
-        leftRequired,
-        " (",
-        leftDiffStr,
-        ")"
-    }
-    leftLineClean = strings.concatenate(strArrayClean[:], allocator)    
-    if leftDiff > 0 {
-        leftLine = leftLineClean
-    } else {
-        strArray : []string = {
-            "\x1b[48;5;22m",
-            leftFront,
-            beforeColonLeft,
-            ": ",
-            leftProvided,
-            "/",
-            leftRequired,
-            " (",
-            leftDiffStr,
-            ")",
-            "\x1b[48;5;0m"
-        }
-        leftLine = strings.concatenate(strArray[:], allocator)
-    }
-    clear(&beforeColonRunes)
-    for _ in 0..< 55 - len(leftLineClean) do append(&beforeColonRunes, ' ')
-    beforeRight : string = utf8.runes_to_string(beforeColonRunes[:], allocator)
-    clear(&beforeColonRunes)
-    for _ in 0..< 30 - len(resource.right.Name_Localised) do append(&beforeColonRunes, ' ')
-    if rightDiff > 0 {
-        strArray : []string = {
-            beforeRight,
-            resource.right.Name_Localised,
-            utf8.runes_to_string(beforeColonRunes[:], allocator),
-            ": ",
-            rightProvided,
-            "/",
-            rightRequired,
-            " (",
-            rightDiffStr,
-            ")"
-        }
-        rightLine = strings.concatenate(strArray[:], allocator)
-    } else {
-        strArray : []string = {
-            beforeRight,
-            "\x1b[48;5;22m",
-            resource.right.Name_Localised,
-            utf8.runes_to_string(beforeColonRunes[:], allocator),
-            ": ",
-            rightProvided,
-            "/",
-            rightRequired,
-            " (",
-            rightDiffStr,
-            ")",
-            "\x1b[48;5;0m"
-        }
-        rightLine = strings.concatenate(strArray[:], allocator)
-    }
+    rightLine = strings.concatenate(strArray[:], allocator)
     finalLine : string = strings.concatenate({leftLine, rightLine}, allocator)
     return finalLine
 }
 
-formatCCDEventResourceSingle :: proc(resource : Resource, allocator := context.allocator) -> string {
+formatCCDEventResourceSingle :: proc(resource : Resource, allocator := context.allocator) -> (line, lineClean : string) {
     diff := resource.RequiredAmount - resource.ProvidedAmount
     provided : string = itoa(resource.ProvidedAmount, allocator)
     required : string = itoa(resource.RequiredAmount, allocator)
     diffStr : string = itoa(diff, allocator)
-    front : string = strings.concatenate({"    ", resource.Name_Localised}, allocator)
+    front : string = resource.Name_Localised
     beforeColonRunes : [dynamic]rune
     defer delete(beforeColonRunes)
     for _ in 0..< 30 - len(front) do append(&beforeColonRunes, ' ')
-    line, lineClean : string
     beforeColon : string = utf8.runes_to_string(beforeColonRunes[:], allocator)
     strArrayClean : []string = {
         front,
@@ -520,7 +450,7 @@ formatCCDEventResourceSingle :: proc(resource : Resource, allocator := context.a
         }
         line = strings.concatenate(strArray[:], allocator)
     }
-    return line
+    return line, lineClean
 }
 
 itoa :: proc(number : i32, allocator := context.allocator) -> string {
