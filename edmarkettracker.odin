@@ -15,7 +15,7 @@ import "core:strconv"
 import "core:unicode/utf8"
 import edlib "../odin-EDLib"
 
-originalMode : windows.DWORD
+ORIGINAL_MODE : windows.DWORD
 hStdOut : windows.HANDLE
 
 main :: proc() {
@@ -23,7 +23,7 @@ main :: proc() {
     hStdOut = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
     mode : windows.DWORD = 0
     if !windows.GetConsoleMode(hStdOut, &mode) do return
-    originalMode = mode
+    ORIGINAL_MODE = mode
     mode |= windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING
     if !windows.SetConsoleMode(hStdOut, mode) do return
     windows.SetConsoleCtrlHandler(handler, true) // handle CTRL+C
@@ -31,7 +31,7 @@ main :: proc() {
     defer {
         // Reset ANSI and terminal mode on clean app close
         fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h\x1b[48;5;0m")
-        windows.SetConsoleMode(hStdOut, originalMode)
+        windows.SetConsoleMode(hStdOut, ORIGINAL_MODE)
     }
 
     // Set ANSI mode
@@ -315,7 +315,7 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
     context = ctx
     if signal == windows.CTRL_C_EVENT {
         fmt.print("\x1b[38;5;7m\x1b[17l\x1b[?25h\x1b[48;5;0m")
-        windows.SetConsoleMode(hStdOut, originalMode)
+        windows.SetConsoleMode(hStdOut, ORIGINAL_MODE)
         windows.ExitProcess(1)
     }
     return windows.FALSE
@@ -323,7 +323,8 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
 
 printCCDEvent :: proc(cEvent : edlib.CCDepotEvent, marketName : string, allocator := context.allocator) {
     fmt.printfln("  %s %v %s : %.2f%% Complete\n", cEvent.event, cEvent.MarketID, marketName, cEvent.ConstructionProgress * 100)
-    r1, r2 := slice.split_at(cEvent.ResourcesRequired, len(cEvent.ResourcesRequired)/2)
+    resourcesSorted := sortMaterials(cEvent.ResourcesRequired, allocator)
+    r1, r2 := slice.split_at(resourcesSorted, len(resourcesSorted)/2)
     r := soa_zip(left=r1, right=r2)
     for resource in r {
         fmt.println(formatCCDEventResourceSOAZip(resource, allocator))
@@ -403,4 +404,55 @@ itoa :: proc(number : i32, allocator := context.allocator) -> string {
     buffer := make([]byte, 256, allocator)
     str : string = strconv.itoa(buffer[:], int(number))
     return str
+}
+
+sortMaterials :: proc(resources : []edlib.Resource, allocator := context.allocator) -> []edlib.Resource {
+    chem, consumer, food, ind, mach, med, metal, tech, text, waste, weap : [dynamic]edlib.Resource
+    defer {
+        delete(chem)
+        delete(consumer)
+        delete(food)
+        delete(ind)
+        delete(mach)
+        delete(med)
+        delete(metal)
+        delete(tech)
+        delete(text)
+        delete(waste)
+        delete(weap)
+    }
+    for resource in resources {
+        switch resource.Name_Localised {
+            case "Liquid oxygen", "Pesticides", "Surface Stabilisers", "Water":
+                append_elem(&chem, resource)
+            case "Evacuation Shelter", "Survival Equipment":
+                append_elem(&consumer, resource)
+            case "Food Cartridges", "Fruit and Vegetables", "Grain":
+                append_elem(&food, resource)
+            case "Ceramic Composites", "CMM Composite", "Insulating Membrane", "Polymers", "Semiconductors", "Superconductors":
+                append_elem(&ind, resource)
+            case "Building Fabricators", "Crop Harvesters", "Emergency Power Cells", "Geological Equipment", "Microbial Furnaces", "Mineral Extractors", "Power Generators", "Thermal Cooling Units", "Water Purifiers":
+                append_elem(&mach, resource)
+            case "Agri-Medicines", "Basic Medicines", "Combat Stabilisers":
+                append_elem(&med, resource)
+            case "Aluminium", "Copper", "Steel", "Titanium":
+                append_elem(&metal, resource)
+            case "Advanced Catalysers", "Bioreducing Lichen", "Computer Components", "H.E. Suits", "Land Enrichment Systems", "Medical Diagnostic Equipment", "Micro Controllers", "Muon Imager", "Resonating Separators", "Robotics", "Structural Regulators":
+                append_elem(&tech, resource)
+            case "Military Grade Fabrics":
+                append_elem(&text, resource)
+            case "Biowaste":
+                append_elem(&waste, resource)
+            case "Battle Weapons", "Non-Lethal Weapons", "Reactive Armour":
+                append_elem(&weap, resource)
+            case:
+                fmt.println("Not in cases:", resource.Name_Localised)
+        }
+    }
+    resStage1 : [][]edlib.Resource = {
+        chem[:], consumer[:], food[:], ind[:], mach[:], med[:], metal[:], tech[:], text[:], waste[:], weap[:]
+    }
+    resStage2, concatErr := slice.concatenate(resStage1, allocator)
+    if concatErr != nil do panic("Concatenation Error on line 455")
+    return resStage2
 }
