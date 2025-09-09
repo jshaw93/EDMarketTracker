@@ -161,7 +161,7 @@ main :: proc() {
         if !checkAvoid(dEvent.StationName) {
             printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
             dockedEvents[dEvent.StationName] = dEvent
-            writeErr := writeMarketData(dockedEvents, arenaAlloc)
+            writeErr := writeMarketData(dockedEvents)
             if writeErr != 0 do return
         }
     }
@@ -200,7 +200,7 @@ main :: proc() {
                 if !checkAvoid(dEvent.StationName) {
                     printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                     dockedEvents[dEvent.StationName] = dEvent
-                    writeErr := writeMarketData(dockedEvents, arenaAlloc)
+                    writeErr := writeMarketData(dockedEvents)
                     if writeErr != 0 do return
                     if latestCCDEvent.event != "" && latestCCDEvent.ConstructionProgress != 1.0 {
                         printCCDEvent(latestCCDEvent, latestDocked.StationName)
@@ -218,7 +218,7 @@ main :: proc() {
                 }
                 fmt.print("\x1b[3J\x1b[H\x1b[J")
                 printArt()
-                printCCDEvent(cEvent, marketName, arenaAlloc)
+                printCCDEvent(cEvent, marketName)
                 latestCCDEvent = cEvent
             }
         }
@@ -251,10 +251,10 @@ printEconomies :: proc(dEvent : edlib.DockedEvent, historic : []edlib.Economy) {
     fmt.println("=======================================")
 }
 
-writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent, allocator := context.allocator) -> u8 {
+writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent) -> u8 {
     options : json.Marshal_Options
     options.pretty = true
-    dData, mErr := json.marshal(dockedEvents, options, allocator=allocator)
+    dData, mErr := json.marshal(dockedEvents, options, allocator=context.temp_allocator)
     if mErr != nil {
         fmt.println("Marshall Err on line 257:", mErr)
         return 1
@@ -264,6 +264,7 @@ writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent, allocator :
         fmt.println("Failed to write marketdata.json at line 262")
         return 2
     }
+    free_all(context.temp_allocator)
     return 0
 }
 
@@ -273,10 +274,7 @@ isMarketModified :: proc(newMarket, historicMarket : []edlib.Economy) -> bool {
 
 checkAvoid :: proc(stationName : string)  -> bool {
     AVOIDWRITE :[]string: {"Construction Site", "ColonisationShip"}
-    for name in AVOIDWRITE {
-        if strings.contains(stationName, name) do return true
-    }
-    return false
+    return slice.contains(AVOIDWRITE, stationName)
 }
 
 buildConfig :: proc(allocator := context.allocator) -> (config : map[string]string, err : u8) {
@@ -288,12 +286,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 289:", mErr)
+        fmt.println("Marshall Error on line 287:", mErr)
         return baseConfig, 1
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 294")
+        fmt.println("Failed to write config.json on line 292")
         return baseConfig, 2
     }
     return baseConfig, 0
@@ -321,20 +319,21 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
     return windows.FALSE
 }
 
-printCCDEvent :: proc(cEvent : edlib.CCDepotEvent, marketName : string, allocator := context.allocator) {
+printCCDEvent :: proc(cEvent : edlib.CCDepotEvent, marketName : string) {
     fmt.printfln("  %s %v %s : %.2f%% Complete\n", cEvent.event, cEvent.MarketID, marketName, cEvent.ConstructionProgress * 100)
-    resourcesSorted := sortMaterials(cEvent.ResourcesRequired, allocator)
+    resourcesSorted := sortMaterials(cEvent.ResourcesRequired, context.temp_allocator)
     r1, r2 := slice.split_at(resourcesSorted, len(resourcesSorted)/2)
     r := soa_zip(left=r1, right=r2)
     for resource in r {
-        fmt.println(formatCCDEventResourceSOAZip(resource, allocator))
+        fmt.println(formatCCDEventResourceSOAZip(resource, context.temp_allocator))
     }
     if len(r2) > len(r1) {
-        line, _ := formatCCDEventResourceSingle(r2[len(r2)-1])
-        line = strings.concatenate({"    ", line}, allocator)
+        line, _ := formatCCDEventResourceSingle(r2[len(r2)-1], context.temp_allocator)
+        line = strings.concatenate({"    ", line}, context.temp_allocator)
         fmt.printfln(line)
     }
     fmt.println("=======================================")
+    free_all(context.temp_allocator)
 }
 
 // Dynamically format CCDEvent Resource #soa array into a single line string
@@ -453,6 +452,6 @@ sortMaterials :: proc(resources : []edlib.Resource, allocator := context.allocat
         chem[:], consumer[:], food[:], ind[:], mach[:], med[:], metal[:], tech[:], text[:], waste[:], weap[:]
     }
     resStage2, concatErr := slice.concatenate(resStage1, allocator)
-    if concatErr != nil do panic("Concatenation Error on line 455")
+    if concatErr != nil do panic("Concatenation Error on line 454")
     return resStage2
 }
