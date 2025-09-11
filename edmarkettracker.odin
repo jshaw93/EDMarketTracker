@@ -162,7 +162,7 @@ main :: proc() {
             printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
             dockedEvents[dEvent.StationName] = dEvent
             writeErr := writeMarketData(dockedEvents)
-            if writeErr != 0 do return
+            if writeErr != nil do return
         }
     }
 
@@ -201,7 +201,7 @@ main :: proc() {
                     printEconomies(dEvent, dockedEvents[dEvent.StationName].StationEconomies)
                     dockedEvents[dEvent.StationName] = dEvent
                     writeErr := writeMarketData(dockedEvents)
-                    if writeErr != 0 do return
+                    if writeErr != nil do return
                     if latestCCDEvent.event != "" && latestCCDEvent.ConstructionProgress != 1.0 {
                         printCCDEvent(latestCCDEvent, latestDocked.StationName)
                     }
@@ -251,21 +251,26 @@ printEconomies :: proc(dEvent : edlib.DockedEvent, historic : []edlib.Economy) {
     fmt.println("=======================================")
 }
 
-writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent) -> u8 {
+MarketDataError :: enum {
+    MarshalError,
+    WriteError
+}
+
+writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent) -> MarketDataError {
     defer free_all(context.temp_allocator)
     options : json.Marshal_Options
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=context.temp_allocator)
     if mErr != nil {
-        fmt.println("Marshall Err on line 257:", mErr)
-        return 1
+        fmt.println("Marshall Err on line 263:", mErr)
+        return .MarshalError
     }
     success := os.write_entire_file("marketdata.json", dData[:])
     if !success {
-        fmt.println("Failed to write marketdata.json at line 262")
-        return 2
+        fmt.println("Failed to write marketdata.json at line 268")
+        return .WriteError
     }
-    return 0
+    return nil
 }
 
 isMarketModified :: proc(newMarket, historicMarket : []edlib.Economy) -> bool {
@@ -291,12 +296,12 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 292:", mErr)
+        fmt.println("Marshall Error on line 297:", mErr)
         return baseConfig, .MarshalError
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 297")
+        fmt.println("Failed to write config.json on line 302")
         return baseConfig, .WriteError
     }
     return baseConfig, nil
@@ -457,6 +462,6 @@ sortMaterials :: proc(resources : []edlib.Resource, allocator := context.allocat
         chem[:], consumer[:], food[:], ind[:], mach[:], med[:], metal[:], tech[:], text[:], waste[:], weap[:]
     }
     resStage2, concatErr := slice.concatenate(resStage1, allocator)
-    if concatErr != nil do panic("Concatenation Error on line 459")
+    if concatErr != nil do panic("Concatenation Error on line 464")
     return resStage2
 }
