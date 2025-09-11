@@ -78,9 +78,9 @@ main :: proc() {
     defer delete(config)
     configExists : bool = os.exists("config.json")
     if !configExists {
-        buildErr : u8 = 0
+        buildErr : ConfigBuildErr
         config, buildErr = buildConfig(arenaAlloc)
-        if buildErr != 0 do return
+        if buildErr != nil do return
     } else {
         configRaw, success := os.read_entire_file_from_filename("config.json", arenaAlloc)
         umErr := json.unmarshal(configRaw, &config, allocator=arenaAlloc)
@@ -252,6 +252,7 @@ printEconomies :: proc(dEvent : edlib.DockedEvent, historic : []edlib.Economy) {
 }
 
 writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent) -> u8 {
+    defer free_all(context.temp_allocator)
     options : json.Marshal_Options
     options.pretty = true
     dData, mErr := json.marshal(dockedEvents, options, allocator=context.temp_allocator)
@@ -264,7 +265,6 @@ writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent) -> u8 {
         fmt.println("Failed to write marketdata.json at line 262")
         return 2
     }
-    free_all(context.temp_allocator)
     return 0
 }
 
@@ -277,7 +277,12 @@ checkAvoid :: proc(stationName : string)  -> bool {
     return slice.contains(AVOIDWRITE, stationName)
 }
 
-buildConfig :: proc(allocator := context.allocator) -> (config : map[string]string, err : u8) {
+ConfigBuildErr :: enum {
+    MarshalError,
+    WriteError
+}
+
+buildConfig :: proc(allocator := context.allocator) -> (config : map[string]string, err : ConfigBuildErr) {
     baseConfig := make(map[string]string, allocator)
     user := os.get_env("USERPROFILE", allocator)
     logPath : string = strings.concatenate({user, "\\Saved Games\\Frontier Developments\\Elite Dangerous"}, allocator)
@@ -286,15 +291,15 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     mOpt.pretty = true
     data, mErr := json.marshal(baseConfig, mOpt, allocator)
     if mErr != nil {
-        fmt.println("Marshall Error on line 287:", mErr)
-        return baseConfig, 1
+        fmt.println("Marshall Error on line 292:", mErr)
+        return baseConfig, .MarshalError
     }
     success := os.write_entire_file("config.json", data)
     if !success {
-        fmt.println("Failed to write config.json on line 292")
-        return baseConfig, 2
+        fmt.println("Failed to write config.json on line 297")
+        return baseConfig, .WriteError
     }
-    return baseConfig, 0
+    return baseConfig, nil
 }
 
 printArt :: proc() {
@@ -351,7 +356,7 @@ formatCCDEventResourceSOAZip :: proc(resourceSOA : struct {left,right:edlib.Reso
         beforeRight,
         rightLine
     }
-    rightLine = strings.concatenate(strArray[:], allocator)
+    rightLine = strings.concatenate(strArray, allocator)
     finalLine : string = strings.concatenate({leftLine, rightLine}, allocator)
     return finalLine
 }
@@ -377,7 +382,7 @@ formatCCDEventResourceSingle :: proc(resource : edlib.Resource, allocator := con
         diffStr,
         ")"
     }
-    lineClean = strings.concatenate(strArrayClean[:], allocator)
+    lineClean = strings.concatenate(strArrayClean, allocator)
     if diff > 0 {
         line = lineClean
     } else {
@@ -394,7 +399,7 @@ formatCCDEventResourceSingle :: proc(resource : edlib.Resource, allocator := con
             ")",
             "\x1b[48;5;0m"
         }
-        line = strings.concatenate(strArray[:], allocator)
+        line = strings.concatenate(strArray, allocator)
     }
     return line, lineClean
 }
@@ -452,6 +457,6 @@ sortMaterials :: proc(resources : []edlib.Resource, allocator := context.allocat
         chem[:], consumer[:], food[:], ind[:], mach[:], med[:], metal[:], tech[:], text[:], waste[:], weap[:]
     }
     resStage2, concatErr := slice.concatenate(resStage1, allocator)
-    if concatErr != nil do panic("Concatenation Error on line 454")
+    if concatErr != nil do panic("Concatenation Error on line 459")
     return resStage2
 }
