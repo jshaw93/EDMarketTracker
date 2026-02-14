@@ -17,8 +17,8 @@ buildConfig :: proc(allocator := context.allocator) -> (config : map[string]stri
     if mErr != nil {
         return baseConfig, .MarshalError
     }
-    success := os.write_entire_file("config.json", data)
-    if !success {
+    writeErr := os.write_entire_file("config.json", data)
+    if writeErr != nil {
         return baseConfig, .WriteError
     }
     return baseConfig, nil
@@ -33,8 +33,8 @@ writeMarketData :: proc(dockedEvents : map[string]edlib.DockedEvent) -> MarketDa
         fmt.printfln("Marshal Error: %s", mErr)
         return .MarshalError
     }
-    success := os.write_entire_file("marketdata.json", dData[:])
-    if !success {
+    writeErr := os.write_entire_file("marketdata.json", dData[:])
+    if writeErr != nil {
         return .WriteError
     }
     return nil

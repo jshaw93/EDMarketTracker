@@ -3,6 +3,7 @@ package markettracker
 import "core:strings"
 import "core:unicode/utf8"
 import edlib "../odin-EDLib"
+import "../odintools/stringTools"
 
 // Dynamically format CCDEvent Resource #soa array into a single line string
 // Highlight section green if the haul for a specific resource has been finished for
@@ -26,9 +27,9 @@ formatCCDEventResourceSOAZip :: proc(resourceSOA : struct {left,right:edlib.Reso
 
 formatCCDEventResourceSingle :: proc(resource : edlib.Resource, allocator := context.allocator) -> (line, lineClean : string) {
     diff := resource.RequiredAmount - resource.ProvidedAmount
-    provided : string = itoa(resource.ProvidedAmount, allocator)
-    required : string = itoa(resource.RequiredAmount, allocator)
-    diffStr : string = itoa(diff, allocator)
+    provided : string = stringTools.i32ToStringDelimited(resource.ProvidedAmount, ',', allocator)
+    required : string = stringTools.i32ToStringDelimited(resource.RequiredAmount, ',', allocator)
+    diffStr : string = stringTools.i32ToStringDelimited(diff, ',', allocator)
     front : string = resource.Name_Localised
     beforeColonRunes : [dynamic]rune
     defer delete(beforeColonRunes)

@@ -12,7 +12,6 @@ import "core:slice"
 import "core:sys/windows"
 import "base:runtime"
 import "core:strconv"
-import "core:unicode/utf8"
 import edlib "../odin-EDLib"
 
 ORIGINAL_MODE : windows.DWORD
@@ -44,7 +43,7 @@ main :: proc() {
 
     arena : vmem.Arena
     allocErr := vmem.arena_init_growing(&arena)
-    if allocErr != nil do panic("Allocation Error at line 46")
+    if allocErr != nil do panic("Allocation Error at line 45")
     defer vmem.arena_destroy(&arena)
     arenaAlloc := vmem.arena_allocator(&arena)
 
@@ -56,19 +55,19 @@ main :: proc() {
     if !mDataExists {
         mData, mErr := json.marshal(dockedEvents, allocator=arenaAlloc)
         if mErr != nil {
-            fmt.println("Marshall Error on line 57:", mErr)
+            fmt.println("Marshall Error on line 56:", mErr)
             return
         }
-        success := os.write_entire_file("marketdata.json", mData)
-        if !success {
-            fmt.println("Failed to write marketdata.json on line 62")
+        writeErr := os.write_entire_file("marketdata.json", mData)
+        if writeErr != nil {
+            fmt.printfln("Failed to write marketdata.json on line 61: %s", writeErr)
             return
         }
     } else {
-        jsonData, success := os.read_entire_file_from_filename("marketdata.json", arenaAlloc)
+        jsonData, success := os.read_entire_file_from_path("marketdata.json", arenaAlloc)
         umErr := json.unmarshal(jsonData, &dockedEvents, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 69:", umErr)
+            fmt.println("Unmarshall Error at line 68:", umErr)
             return
         }
     }
@@ -82,18 +81,18 @@ main :: proc() {
         config, buildErr = buildConfig(arenaAlloc)
         if buildErr != nil {
             if buildErr == .MarshalError {
-                fmt.println("Marshal Error on line 82")
+                fmt.println("Marshal Error on line 81")
             }
             if buildErr == .WriteError {
-                fmt.println("Failed to write config.json on line 82")
+                fmt.println("Failed to write config.json on line 81")
             }
             return
         }
     } else {
-        configRaw, success := os.read_entire_file_from_filename("config.json", arenaAlloc)
+        configRaw, readErr := os.read_entire_file_from_path("config.json", arenaAlloc)
         umErr := json.unmarshal(configRaw, &config, allocator=arenaAlloc)
         if umErr != nil {
-            fmt.println("Unmarshall Error at line 86:", umErr)
+            fmt.println("Unmarshall Error at line 93:", umErr)
             return
         }
     }
@@ -102,7 +101,7 @@ main :: proc() {
     logPath : string = config["JournalDirectory"]
     handle, err := os.open(logPath)
     if err != nil {
-        fmt.println("Open error line 103:", err)
+        fmt.println("Open error line 102:", err)
         return
     }
     defer os.close(handle)
@@ -131,13 +130,13 @@ main :: proc() {
     if readErr != nil {
         fmt.println("Configured Journal Directory:", logPath)
         fmt.println("Does", latest.fullpath, "exist?")
-        fmt.println("Read error at line 130, missing file")
+        fmt.println("Read error at line 129, missing file")
         fmt.printfln("Read error: %s", readErr)
         fmt.println("Len FileInfos:", len(fileInfos))
         return
     }
     defer os.close(logHandle)
-    data, _ := os.read_entire_file_from_handle(logHandle, arenaAlloc)
+    data, _ := os.read_entire_file_from_file(logHandle, arenaAlloc)
     dataString : string = string(data)
     lines : []string = strings.split(dataString, "\r\n", arenaAlloc)
     if len(lines) < 1 {
@@ -163,7 +162,7 @@ main :: proc() {
     if len(lastDocked) > 0 {
         dEvent, uErr = edlib.deserializeDockedEvent(lastDocked, arenaAlloc)
         if uErr != nil {
-            fmt.printfln("Unmarshall Error at line 164: %s", uErr)
+            fmt.printfln("Unmarshall Error at line 163: %s", uErr)
             return
         }
         if !checkAvoid(dEvent.StationName) {
@@ -172,10 +171,10 @@ main :: proc() {
             writeErr := writeMarketData(dockedEvents)
             if writeErr != nil {
                 if writeErr == .MarshalError {
-                    fmt.println("Marshal Error at line 172")
+                    fmt.println("Marshal Error at line 171")
                 }
                 if writeErr == .WriteError {
-                    fmt.println("Write Error at line 172")
+                    fmt.println("Write Error at line 171")
                 }
                 return
             }
@@ -186,7 +185,7 @@ main :: proc() {
         marketName : string = "No market name found"
         cEvent, uErr = edlib.deserializeCCDepotEvent(lastCCDepot, arenaAlloc)
         if uErr != nil {
-            fmt.printfln("Unmarshall Error at line 187: %s", uErr)
+            fmt.printfln("Unmarshall Error at line 186: %s", uErr)
             return
         }
         printCCDEvent(cEvent, marketName)
@@ -210,7 +209,7 @@ main :: proc() {
             if strings.contains(line, "\"event\":\"Docked\"") {
                 dEvent, uErr = edlib.deserializeDockedEvent(line, arenaAlloc)
                 if uErr != nil {
-                    fmt.printfln("Unmarshall Error at line 211: %s", uErr)
+                    fmt.printfln("Unmarshall Error at line 210: %s", uErr)
                     return
                 }
                 if !checkAvoid(dEvent.StationName) {
@@ -229,7 +228,7 @@ main :: proc() {
                 if latestDocked.StationName != "" do marketName = latestDocked.StationName
                 cEvent, uErr = edlib.deserializeCCDepotEvent(line, arenaAlloc)
                 if uErr != nil {
-                    fmt.printfln("Unmarshall Error at line 230: %s", uErr)
+                    fmt.printfln("Unmarshall Error at line 229: %s", uErr)
                     return
                 }
                 fmt.print("\x1b[3J\x1b[H\x1b[J")
@@ -248,7 +247,10 @@ isMarketModified :: proc(newMarket, historicMarket : []edlib.Economy) -> bool {
 
 checkAvoid :: proc(stationName : string)  -> bool {
     AVOIDWRITE :[]string: {"Construction Site", "ColonisationShip"}
-    return slice.contains(AVOIDWRITE, stationName)
+    for partial in AVOIDWRITE {
+        if strings.contains(stationName, partial) do return true
+    }
+    return false
 }
 
 handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
@@ -265,7 +267,7 @@ handler :: proc "std" (signal : windows.DWORD) -> windows.BOOL {
 
 itoa :: proc(number : i32, allocator := context.allocator) -> string {
     buffer := make([]byte, 256, allocator)
-    str : string = strconv.itoa(buffer[:], int(number))
+    str : string = strconv.write_int(buffer[:], i64(number), 10)
     return str
 }
 
@@ -316,6 +318,6 @@ sortMaterials :: proc(resources : []edlib.Resource, allocator := context.allocat
         chem[:], consumer[:], food[:], ind[:], mach[:], med[:], metal[:], tech[:], text[:], waste[:], weap[:]
     }
     resStage2, concatErr := slice.concatenate(resStage1, allocator)
-    if concatErr != nil do panic("Concatenation Error on line 318")
+    if concatErr != nil do panic("Concatenation Error on line 320")
     return resStage2
 }
